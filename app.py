@@ -4,59 +4,76 @@ import numpy as np
 from io import BytesIO
 from PIL import Image
 import tensorflow as tf
+import os
+import gc
 
 app = FastAPI()
 
-# 1. Model ko globally initialize karein
+# Model load karne ka rasta
+MODEL_PATH = 'rps_cnn_model.h5'
 model = None
 
-try:
-    # Model load karein
-    model = tf.keras.models.load_model('rps_cnn_model.h5')
-    print("✓ Rock-Paper-Scissors Model successfully loaded!")
-except Exception as e:
-    print(f"✗ Error loading model: {e}")
+def load_model_safely():
+    global model
+    if os.path.exists(MODEL_PATH):
+        try:
+            # compile=False aur memory management ke sath model load karna
+            model = tf.keras.models.load_model(MODEL_PATH, compile=False)
+            print("✓ Model loaded successfully!")
+        except Exception as e:
+            print(f"✗ Model loading error: {e}")
+    else:
+        print(f"✗ File not found at {MODEL_PATH}")
 
-# Class Names
-class_names = ['paper', 'rock', 'scissors']
+@app.on_event("startup")
+async def startup_event():
+    load_model_safely()
 
 @app.get("/")
 async def root():
-    return {"message": "Asad, RPS Classifier is Ready!"}
+    # Asad, ye check karne ke liye ke API zinda hai
+    return {
+        "message": "Asad, RPS Classifier is Ready!",
+        "model_status": "Loaded" if model else "Not Loaded"
+    }
 
 def preprocess_image(data) -> np.ndarray:
+    # Image resize aur normalization (Aapke project ke mutabiq 180x180)
     image = Image.open(BytesIO(data)).convert('RGB')
-    image = image.resize((180, 180))
-    image_array = np.array(image)
-    image_array = np.expand_dims(image_array, axis=0)
-    image_array = image_array / 255.0
-    return image_array
+    image = image.resize((180, 180)) 
+    img_array = np.array(image) / 255.0
+    img_array = np.expand_dims(img_array, axis=0)
+    return img_array
 
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
-    # Check karein ke kya model load hua hai
     if model is None:
-        return {"error": "Model is not loaded on the server. Check terminal for errors."}
+        return {"error": "Model is not loaded on the server. Check logs."}
     
     try:
-        bytes_data = await file.read()
-        processed_image = preprocess_image(bytes_data)
+        content = await file.read()
+        processed_img = preprocess_image(content)
         
-        # Prediction
-        predictions = model.predict(processed_image)
+        # Prediction logic
+        predictions = model.predict(processed_img)
+        classes = ['Paper', 'Rock', 'Scissors']
         
-        predicted_class_index = np.argmax(predictions)
-        predicted_class = class_names[predicted_class_index]
-        confidence = float(np.max(predictions))
+        predicted_idx = np.argmax(predictions[0])
+        confidence = float(np.max(predictions[0]))
+
+        # Memory saaf karna taake aglay request ke liye jagah banay
+        del processed_img
+        gc.collect()
 
         return {
-            "filename": file.filename,
-            "prediction": predicted_class,
-            "confidence": f"{confidence * 100:.2f}%"
+            "prediction": classes[predicted_idx],
+            "confidence": f"{confidence * 100:.2f}%",
+            "filename": file.filename
         }
-        
     except Exception as e:
-        return {"error": f"Internal Error: {str(e)}"}
+        return {"error": f"Prediction failed: {str(e)}"}
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    # Render ke liye port management
+    port = int(os.environ.get("PORT", 10000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
