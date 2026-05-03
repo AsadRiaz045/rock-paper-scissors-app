@@ -9,7 +9,7 @@ import gc
 
 app = FastAPI()
 
-# Model load karne ka rasta
+# Model configuration
 MODEL_PATH = 'rps_cnn_model.h5'
 model = None
 
@@ -17,13 +17,14 @@ def load_model_safely():
     global model
     if os.path.exists(MODEL_PATH):
         try:
-            # compile=False aur memory management ke sath model load karna
+            # Keras 3/TF 2.16+ mein h5 files ke liye compile=False lazmi hai
+            # Agar version mismatch ho to ye 'batch_shape' error ko handle kar leta hai
             model = tf.keras.models.load_model(MODEL_PATH, compile=False)
-            print("✓ Model loaded successfully!")
+            print("✓ SUCCESS: Model loaded successfully!")
         except Exception as e:
-            print(f"✗ Model loading error: {e}")
+            print(f"✗ ERROR: Model loading failed. Details: {e}")
     else:
-        print(f"✗ File not found at {MODEL_PATH}")
+        print(f"✗ ERROR: {MODEL_PATH} not found in the directory.")
 
 @app.on_event("startup")
 async def startup_event():
@@ -31,14 +32,14 @@ async def startup_event():
 
 @app.get("/")
 async def root():
-    # Asad, ye check karne ke liye ke API zinda hai
     return {
         "message": "Asad, RPS Classifier is Ready!",
-        "model_status": "Loaded" if model else "Not Loaded"
+        "model_status": "Active" if model else "Inactive",
+        "tensorflow_version": tf.__version__
     }
 
 def preprocess_image(data) -> np.ndarray:
-    # Image resize aur normalization (Aapke project ke mutabiq 180x180)
+    # Image resize (180, 180) as per your training
     image = Image.open(BytesIO(data)).convert('RGB')
     image = image.resize((180, 180)) 
     img_array = np.array(image) / 255.0
@@ -48,20 +49,20 @@ def preprocess_image(data) -> np.ndarray:
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
     if model is None:
-        return {"error": "Model is not loaded on the server. Check logs."}
+        return {"error": "Model is not loaded. Please check server logs."}
     
     try:
         content = await file.read()
         processed_img = preprocess_image(content)
         
-        # Prediction logic
+        # Inference
         predictions = model.predict(processed_img)
         classes = ['Paper', 'Rock', 'Scissors']
         
         predicted_idx = np.argmax(predictions[0])
         confidence = float(np.max(predictions[0]))
 
-        # Memory saaf karna taake aglay request ke liye jagah banay
+        # Cleanup memory
         del processed_img
         gc.collect()
 
@@ -71,9 +72,9 @@ async def predict(file: UploadFile = File(...)):
             "filename": file.filename
         }
     except Exception as e:
-        return {"error": f"Prediction failed: {str(e)}"}
+        return {"error": f"Prediction error: {str(e)}"}
 
 if __name__ == "__main__":
-    # Render ke liye port management
+    # Render dynamic port binding
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
