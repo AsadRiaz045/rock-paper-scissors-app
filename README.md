@@ -4,4 +4,5 @@ This is a fun web app that I built using Python and Machine Learning. It can tel
 Try it yourself!
 This app is live for the whole world to see. Go ahead and test it at this link:
 
-➡️ [(https://rock-paper-sciapprs-app-ezohjrkttkuxqdntmyw4ah.streamlit.app/)]
+➡️ [(https://rock-paper-scissors-app-euv8.onrender.com/docs)]
+
